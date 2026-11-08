@@ -1,7 +1,7 @@
 // 把歌單排行畫成 IG 用的文字雲圖片（方形 / 限動兩種尺寸，可選形狀、背景主題、字型）
 
 export type CloudFormat = "square" | "story";
-export type CloudShape = "ellipse" | "heart" | "star" | "square";
+export type CloudShape = "free" | "ellipse" | "heart" | "star" | "square";
 export type CloudTheme = "cosmos" | "sunset" | "mono" | "cream";
 
 type Layout = {
@@ -39,8 +39,12 @@ export const MIN_SONGS_WITHOUT_REPEAT = 20;
 
 // ─── 形狀 ──────────────────────────────────────────────
 
-/** 在 w×h 的框裡畫出形狀；愛心、星星維持原本比例置中 */
-export const SHAPES: Record<CloudShape, { label: string; path: (w: number, h: number) => Path2D }> = {
+/**
+ * 在 w×h 的框裡畫出形狀；愛心、星星維持原本比例置中。
+ * path 為 null 的「預設」不套遮罩：字從中心自然往外長，邊緣是不規則的雲狀
+ */
+export const SHAPES: Record<CloudShape, { label: string; path: ((w: number, h: number) => Path2D) | null }> = {
+  free: { label: "預設", path: null },
   ellipse: {
     label: "圓形",
     path: (w, h) => {
@@ -243,6 +247,8 @@ const TEXTURE_MIN = 10;
 const TEXTURE_MAX = 18;
 /** 每多少平方像素放一個紋理字：數量要多到能填滿形狀，放不下的會被略過 */
 const TEXTURE_AREA_PER_WORD = 1400;
+/** 「預設」形狀沒有邊界，紋理只鋪大約這個比例的面積，邊緣才會保持自然的雲狀 */
+const FREE_AREA_RATIO = 0.5;
 const HERO_LIMIT = 6;
 /** 主角最多 6 首；歌少時取前 30%，至少 1 首 */
 const heroCountFor = (n: number) => Math.min(HERO_LIMIT, Math.max(1, Math.ceil(n * 0.3)));
@@ -389,25 +395,22 @@ export async function renderCloud(
   cloud.width = layout.cloud.w;
   cloud.height = layout.cloud.h;
   const cloudCtx = cloud.getContext("2d")!;
-  const shapePath = SHAPES[input.shape].path(cloud.width, cloud.height);
+  const shapePath = SHAPES[input.shape].path?.(cloud.width, cloud.height) ?? null;
+  const shapeArea = shapePath
+    ? measureArea(cloudCtx, shapePath, cloud.width, cloud.height)
+    : cloud.width * cloud.height * FREE_AREA_RATIO;
 
-  const { main, texture } = buildWords(
-    input.titles,
-    measureEm,
-    rand,
-    input.repeat,
-    layout,
-    theme,
-    measureArea(cloudCtx, shapePath, cloud.width, cloud.height),
-  );
+  const { main, texture } = buildWords(input.titles, measureEm, rand, input.repeat, layout, theme, shapeArea);
 
   // 形狀遮罩：先把形狀以外塗滿，wordcloud2（clearCanvas: false）會當成已佔用，字就只會放在形狀裡；
-  // 畫完再把遮罩擦掉。沒有遮罩的話，形狀大小由字數決定，放不下的大字會一路跑到畫布邊緣
-  cloudCtx.fillStyle = "#000";
-  cloudCtx.fillRect(0, 0, cloud.width, cloud.height);
-  cloudCtx.globalCompositeOperation = "destination-out";
-  cloudCtx.fill(shapePath);
-  cloudCtx.globalCompositeOperation = "source-over";
+  // 畫完再把遮罩擦掉
+  if (shapePath) {
+    cloudCtx.fillStyle = "#000";
+    cloudCtx.fillRect(0, 0, cloud.width, cloud.height);
+    cloudCtx.globalCompositeOperation = "destination-out";
+    cloudCtx.fill(shapePath);
+    cloudCtx.globalCompositeOperation = "source-over";
+  }
 
   // 分兩次畫：先放主角和陪襯，再讓紋理填進剩下的空位。
   // 第二次一樣不清畫布，wordcloud2 會把已經畫好的字當成佔用，所以兩層不會重疊，
@@ -455,12 +458,14 @@ export async function renderCloud(
   if (signal.aborted) return;
 
   // 擦掉形狀以外的遮罩
-  cloudCtx.globalCompositeOperation = "destination-out";
-  const outside = new Path2D();
-  outside.rect(0, 0, cloud.width, cloud.height);
-  outside.addPath(shapePath);
-  cloudCtx.fill(outside, "evenodd");
-  cloudCtx.globalCompositeOperation = "source-over";
+  if (shapePath) {
+    cloudCtx.globalCompositeOperation = "destination-out";
+    const outside = new Path2D();
+    outside.rect(0, 0, cloud.width, cloud.height);
+    outside.addPath(shapePath);
+    cloudCtx.fill(outside, "evenodd");
+    cloudCtx.globalCompositeOperation = "source-over";
+  }
 
   ctx.drawImage(cloud, (layout.width - layout.cloud.w) / 2, layout.cloud.top);
 }

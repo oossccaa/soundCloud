@@ -62,7 +62,7 @@ export function CloudPreview({
   const [subtitle, setSubtitle] = useState("");
   const [subtitleEdited, setSubtitleEdited] = useState(false);
   const [format, setFormat] = useState<CloudFormat>("square");
-  const [shape, setShape] = useState<CloudShape>("ellipse");
+  const [shape, setShape] = useState<CloudShape>("free");
   const [theme, setTheme] = useState<CloudTheme>("cosmos");
   const [fontId, setFontId] = useState(fonts[0].id);
   const [repeatPref, setRepeatPref] = useState(true);
@@ -223,7 +223,7 @@ export function CloudPreview({
               value={shape}
               onChange={setShape}
               label="形狀"
-              columns={4}
+              columns={5}
             />
           </Field>
 
@@ -350,14 +350,14 @@ function Segmented<T extends string>({
   value: T;
   onChange: (value: T) => void;
   label: string;
-  columns: 2 | 4;
+  columns: 2 | 4 | 5;
 }) {
   return (
     <div
       role="radiogroup"
       aria-label={label}
       className={`grid gap-1 rounded-xl border border-white/10 bg-white/5 p-1 ${
-        columns === 2 ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4"
+        columns === 2 ? "grid-cols-2" : columns === 5 ? "grid-cols-3 sm:grid-cols-5" : "grid-cols-2 sm:grid-cols-4"
       }`}
     >
       {options.map((o) => (
