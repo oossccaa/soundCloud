@@ -1,15 +1,20 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { ArtistPicker } from "./ArtistPicker";
 import { CloudPreview } from "./CloudPreview";
 import { RankingList, type RankedSong } from "./RankingList";
 import { useLocalStorage } from "@/lib/useLocalStorage";
 import { DEFAULT_ARTIST, type Artist, type Song } from "@/lib/types";
+import type { CloudFont } from "@/app/fonts";
 
 type Catalog = { artistId: number; songs: Song[]; error?: string };
 
-export function SongCloudApp({ fontFamily }: { fontFamily: string }) {
+const noopSubscribe = () => () => {};
+
+export function SongCloudApp({ fonts }: { fonts: CloudFont[] }) {
+  // 文字雲改成手動產生，掛載時要拿到 localStorage 裡的排行，所以等 hydration 完才渲染預覽
+  const hydrated = useSyncExternalStore(noopSubscribe, () => true, () => false);
   const [artist, setArtist] = useLocalStorage<Artist>("song-cloud:artist", DEFAULT_ARTIST);
   const [ranking, setRanking] = useLocalStorage<RankedSong[]>(`song-cloud:ranking:${artist.id}`, []);
   const [catalog, setCatalog] = useState<Catalog | null>(null);
@@ -161,7 +166,7 @@ export function SongCloudApp({ fontFamily }: { fontFamily: string }) {
             {ranking.length > 0 && (
               <button
                 onClick={() => confirm("確定清空排行？") && setRanking([])}
-                className="rounded-full px-3 py-1 text-xs text-white/50 hover:bg-red-400/20 hover:text-red-300"
+                className="shrink-0 whitespace-nowrap rounded-full px-3 py-1 text-xs text-white/50 hover:bg-red-400/20 hover:text-red-300"
               >
                 清空
               </button>
@@ -176,7 +181,11 @@ export function SongCloudApp({ fontFamily }: { fontFamily: string }) {
         <section className="mx-auto flex w-full min-w-0 max-w-xl flex-col gap-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4 md:col-span-2 xl:col-span-1 xl:max-w-none">
           <h2 className="font-bold">文字雲預覽</h2>
           {/* key：切換歌手時重設標題 / 副標題 */}
-          <CloudPreview key={artist.id} artistName={artist.name} titles={ranking.map((s) => s.title)} fontFamily={fontFamily} />
+          {hydrated ? (
+            <CloudPreview key={artist.id} artistName={artist.name} titles={ranking.map((s) => s.title)} fonts={fonts} />
+          ) : (
+            <div className="aspect-square w-full animate-pulse rounded-2xl bg-white/5" />
+          )}
         </section>
       </main>
 

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { notoSansTC } from "./fonts";
+import { fontVariables } from "./fonts";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -9,7 +9,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="zh-Hant-TW" className={`${notoSansTC.variable} h-full antialiased`}>
+    <html lang="zh-Hant-TW" className={`${fontVariables} h-full antialiased`}>
       <body className="min-h-full">{children}</body>
     </html>
   );

@@ -1,6 +1,8 @@
-// 把歌單排行畫成 IG 用的文字雲圖片（宇宙風格，單一版型，方形 / 限動兩種尺寸）
+// 把歌單排行畫成 IG 用的文字雲圖片（方形 / 限動兩種尺寸，可選形狀、背景主題、字型）
 
 export type CloudFormat = "square" | "story";
+export type CloudShape = "ellipse" | "heart" | "star" | "square";
+export type CloudTheme = "cosmos" | "sunset" | "mono" | "cream";
 
 type Layout = {
   width: number;
@@ -35,22 +37,185 @@ export const LAYOUTS: Record<CloudFormat, Layout> = {
 /** 歌曲少於這個數量時一定要重複填滿，不然形狀會太空 */
 export const MIN_SONGS_WITHOUT_REPEAT = 20;
 
-const ACCENTS = ["#FFD166", "#FF6B9A", "#7AE7FF", "#B69CFF", "#8CFFB5", "#FFFFFF"];
-const FILLERS = [
-  "rgba(182,156,255,0.55)",
-  "rgba(122,231,255,0.5)",
-  "rgba(255,255,255,0.4)",
-  "rgba(255,107,154,0.45)",
-];
+// ─── 形狀 ──────────────────────────────────────────────
+
+/** 在 w×h 的框裡畫出形狀；愛心、星星維持原本比例置中 */
+export const SHAPES: Record<CloudShape, { label: string; path: (w: number, h: number) => Path2D }> = {
+  ellipse: {
+    label: "圓形",
+    path: (w, h) => {
+      const p = new Path2D();
+      p.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+      return p;
+    },
+  },
+  heart: {
+    label: "愛心",
+    path: (w, h) => {
+      // 經典愛心參數式：x ∈ [-16, 16]、y ∈ [-17, 12]
+      const scale = Math.min(w / 33, h / 30);
+      const cx = w / 2;
+      const cy = h / 2 - 2.5 * scale;
+      const p = new Path2D();
+      for (let i = 0; i <= 240; i++) {
+        const t = (i / 240) * Math.PI * 2;
+        const x = 16 * Math.sin(t) ** 3;
+        const y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+        if (i === 0) p.moveTo(cx + x * scale, cy - y * scale);
+        else p.lineTo(cx + x * scale, cy - y * scale);
+      }
+      p.closePath();
+      return p;
+    },
+  },
+  star: {
+    label: "星星",
+    path: (w, h) => {
+      // 五角星的外框寬 1.902R、高 1.809R；內徑比一般星星胖一點，字才塞得進角
+      const r = Math.min(w / 1.902, h / 1.809);
+      const inner = r * 0.55;
+      const cx = w / 2;
+      const cy = h / 2 + (r * (1 - Math.cos(Math.PI / 5))) / 2;
+      const p = new Path2D();
+      for (let i = 0; i < 10; i++) {
+        const radius = i % 2 === 0 ? r : inner;
+        const a = -Math.PI / 2 + (i * Math.PI) / 5;
+        const x = cx + radius * Math.cos(a);
+        const y = cy + radius * Math.sin(a);
+        if (i === 0) p.moveTo(x, y);
+        else p.lineTo(x, y);
+      }
+      p.closePath();
+      return p;
+    },
+  },
+  square: {
+    label: "滿版",
+    path: (w, h) => {
+      const p = new Path2D();
+      p.roundRect(0, 0, w, h, 48);
+      return p;
+    },
+  },
+};
+
+// ─── 背景主題 ──────────────────────────────────────────
+
+type Theme = {
+  label: string;
+  /** 設定面板上的色票 */
+  swatch: string;
+  drawBackground: (ctx: CanvasRenderingContext2D, w: number, h: number, rand: () => number) => void;
+  /** 主角依名次用的顏色，也是陪襯隨機挑的顏色 */
+  accents: string[];
+  /** 紋理字的顏色（已含透明度） */
+  fillers: string[];
+  title: string;
+  titleGlow: string | null;
+  subtitle: string;
+};
+
+function drawStars(ctx: CanvasRenderingContext2D, w: number, h: number, rand: () => number, density: number) {
+  const count = Math.round((density * w * h) / (1080 * 1080));
+  ctx.fillStyle = "#ffffff";
+  for (let i = 0; i < count; i++) {
+    const r = rand() * 1.6 + 0.3;
+    ctx.globalAlpha = 0.25 + rand() * 0.6;
+    ctx.beginPath();
+    ctx.arc(rand() * w, rand() * h, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+export const THEMES: Record<CloudTheme, Theme> = {
+  cosmos: {
+    label: "宇宙",
+    swatch: "radial-gradient(circle at 50% 60%, #2a1f6b, #070918)",
+    drawBackground: (ctx, w, h, rand) => {
+      const bg = ctx.createRadialGradient(w / 2, h * 0.55, 60, w / 2, h / 2, Math.max(w, h) * 0.75);
+      bg.addColorStop(0, "#2a1f6b");
+      bg.addColorStop(0.55, "#141238");
+      bg.addColorStop(1, "#070918");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, w, h);
+      drawStars(ctx, w, h, rand, 160);
+    },
+    accents: ["#FFD166", "#FF6B9A", "#7AE7FF", "#B69CFF", "#8CFFB5", "#FFFFFF"],
+    fillers: ["rgba(182,156,255,0.55)", "rgba(122,231,255,0.5)", "rgba(255,255,255,0.4)", "rgba(255,107,154,0.45)"],
+    title: "#ffffff",
+    titleGlow: "rgba(182,156,255,0.8)",
+    subtitle: "#c9c2ff",
+  },
+  sunset: {
+    label: "夕陽",
+    swatch: "linear-gradient(180deg, #1a0a35, #4a1250, #7e2457, #a8445e)",
+    // 底部不要太亮：字都是淺色系，背景亮起來就看不清楚
+    drawBackground: (ctx, w, h, rand) => {
+      const bg = ctx.createLinearGradient(0, 0, 0, h);
+      bg.addColorStop(0, "#1a0a35");
+      bg.addColorStop(0.45, "#4a1250");
+      bg.addColorStop(0.8, "#7e2457");
+      bg.addColorStop(1, "#a8445e");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, w, h);
+      drawStars(ctx, w, h * 0.4, rand, 50);
+    },
+    accents: ["#FFE29A", "#FFFFFF", "#FFC7A8", "#FFB3C7", "#FFF1C1", "#F9D0F0"],
+    fillers: ["rgba(255,236,200,0.5)", "rgba(255,255,255,0.42)", "rgba(255,190,210,0.5)", "rgba(255,226,154,0.45)"],
+    title: "#ffffff",
+    titleGlow: "rgba(255,150,120,0.8)",
+    subtitle: "#ffe4d1",
+  },
+  mono: {
+    label: "極簡黑",
+    swatch: "radial-gradient(circle, #0b0b0c 45%, transparent 47%), conic-gradient(#FFD23F, #FF5C8A, #3EC5FF, #7CFFB2, #FFD23F)",
+    drawBackground: (ctx, w, h) => {
+      const bg = ctx.createRadialGradient(w / 2, h / 2, 40, w / 2, h / 2, Math.max(w, h) * 0.7);
+      bg.addColorStop(0, "#1c1c1e");
+      bg.addColorStop(1, "#0b0b0c");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, w, h);
+    },
+    // 黑底配鮮豔的彩色字，跟宇宙主題比起來少了星空和漸層，顏色更跳
+    accents: ["#FFD23F", "#FF5C8A", "#3EC5FF", "#7CFFB2", "#B98CFF", "#FF9F43"],
+    fillers: ["rgba(255,92,138,0.45)", "rgba(62,197,255,0.45)", "rgba(255,210,63,0.4)", "rgba(124,255,178,0.4)", "rgba(185,140,255,0.45)"],
+    title: "#ffffff",
+    titleGlow: null,
+    subtitle: "rgba(255,255,255,0.6)",
+  },
+  cream: {
+    label: "奶油白",
+    swatch: "radial-gradient(circle, #fffaf1, #efe6d6)",
+    drawBackground: (ctx, w, h) => {
+      const bg = ctx.createRadialGradient(w / 2, h / 2, 40, w / 2, h / 2, Math.max(w, h) * 0.75);
+      bg.addColorStop(0, "#FFFAF1");
+      bg.addColorStop(1, "#EFE6D6");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, w, h);
+    },
+    accents: ["#1F2937", "#B4472E", "#2F6F62", "#9C2F5A", "#2D4A8A", "#6B5B4B"],
+    fillers: ["rgba(31,41,55,0.28)", "rgba(180,71,46,0.3)", "rgba(47,111,98,0.3)", "rgba(45,74,138,0.28)"],
+    title: "#1F2937",
+    titleGlow: null,
+    subtitle: "#6B5B4B",
+  },
+};
+
+// ─── 字的大小與分層 ────────────────────────────────────
+
+export type CloudFontSpec = { family: string; weight: number; lightWeight: number };
 
 export type CloudInput = {
   format: CloudFormat;
+  shape: CloudShape;
+  theme: CloudTheme;
+  font: CloudFontSpec;
   title: string;
   subtitle: string;
   titles: string[];
   /** 是否用小字重複填滿；少於 MIN_SONGS_WITHOUT_REPEAT 首時會被強制開啟 */
   repeat: boolean;
-  fontFamily: string;
   seed: number;
 };
 
@@ -71,14 +236,16 @@ function mulberry32(seed: number) {
 // 主角不要太大：圖在手機上看，48px 就很明顯了；字小一點，長歌名直著放也塞得進去，排列才有變化
 const HERO_MAX = 96;
 const HERO_DECAY = 0.9;
-const SUPPORT_MAX = 34;
-const SUPPORT_MIN = 18;
+// 陪襯要明顯比紋理（最大 18px、半透明）大、深，你選的每一首才會從紋理裡跳出來
+const SUPPORT_MAX = 44;
+const SUPPORT_MIN = 24;
 const TEXTURE_MIN = 10;
 const TEXTURE_MAX = 18;
-/** 紋理字的數量：要多到能填滿形狀，放不下的會被略過 */
-const TEXTURE_COUNT = 280;
-/** 主角最多幾首；歌少時取前 30%，至少 1 首 */
-const heroCountFor = (n: number) => Math.min(ACCENTS.length, Math.max(1, Math.ceil(n * 0.3)));
+/** 每多少平方像素放一個紋理字：數量要多到能填滿形狀，放不下的會被略過 */
+const TEXTURE_AREA_PER_WORD = 1400;
+const HERO_LIMIT = 6;
+/** 主角最多 6 首；歌少時取前 30%，至少 1 首 */
+const heroCountFor = (n: number) => Math.min(HERO_LIMIT, Math.max(1, Math.ceil(n * 0.3)));
 
 function withAlpha(hex: string, alpha: number) {
   const n = Number.parseInt(hex.slice(1), 16);
@@ -93,6 +260,8 @@ function buildWords(
   rand: () => number,
   repeat: boolean,
   layout: Layout,
+  theme: Theme,
+  shapeArea: number,
 ): { main: WordSpec[]; texture: WordSpec[] } {
   const n = titles.length;
   const heroCount = heroCountFor(n);
@@ -104,7 +273,7 @@ function buildWords(
   for (let i = 0; i < heroCount; i++) {
     const widthCap = (layout.cloud.w * 0.88) / ems[i];
     const size = Math.min(HERO_MAX * HERO_DECAY ** i * scale, widthCap, main[i - 1]?.size ?? Infinity);
-    main.push({ text: titles[i], size: Math.round(size), color: ACCENTS[i] });
+    main.push({ text: titles[i], size: Math.round(size), color: theme.accents[i % theme.accents.length] });
   }
 
   // 陪襯：名次越後面字越小、越淡
@@ -114,7 +283,7 @@ function buildWords(
     main.push({
       text: titles[heroCount + j],
       size: Math.round((SUPPORT_MAX - (SUPPORT_MAX - SUPPORT_MIN) * t) * scale),
-      color: withAlpha(pick(ACCENTS, rand), 0.8 - 0.3 * t),
+      color: withAlpha(pick(theme.accents, rand), 1 - 0.25 * t),
     });
   }
 
@@ -122,14 +291,15 @@ function buildWords(
   if (repeat || n < MIN_SONGS_WITHOUT_REPEAT) {
     // 紋理：所有歌名重複成更小更淡的字，填滿形狀；長歌名再縮小，避免變成一條條細長的雜訊
     // 每個填充字尾端加不同數量的零寬空白，讓它和主字、其他填充字的 key 都不同
-    const repeats = Math.min(20, Math.max(1, Math.ceil(TEXTURE_COUNT / n)));
+    const textureCount = shapeArea / (TEXTURE_AREA_PER_WORD * scale ** 2);
+    const repeats = Math.min(60, Math.max(1, Math.ceil(textureCount / n)));
     for (let r = 0; r < repeats; r++) {
       titles.forEach((text, i) => {
         const lengthFactor = Math.min(1, Math.sqrt(4 / ems[i]));
         texture.push({
-          text: text + "\u200b".repeat(r + 1),
+          text: text + "​".repeat(r + 1),
           size: Math.round((TEXTURE_MIN + rand() * (TEXTURE_MAX - TEXTURE_MIN)) * lengthFactor * scale),
-          color: pick(FILLERS, rand),
+          color: pick(theme.fillers, rand),
         });
       });
     }
@@ -139,26 +309,7 @@ function buildWords(
   return { main: main.sort(bySize), texture: texture.sort(bySize) };
 }
 
-function drawBackground(ctx: CanvasRenderingContext2D, layout: Layout, rand: () => number) {
-  const { width: W, height: H } = layout;
-  const bg = ctx.createRadialGradient(W / 2, H * 0.55, 60, W / 2, H / 2, Math.max(W, H) * 0.75);
-  bg.addColorStop(0, "#2a1f6b");
-  bg.addColorStop(0.55, "#141238");
-  bg.addColorStop(1, "#070918");
-  ctx.fillStyle = bg;
-  ctx.fillRect(0, 0, W, H);
-
-  const stars = Math.round((160 * W * H) / (1080 * 1080));
-  for (let i = 0; i < stars; i++) {
-    const r = rand() * 1.6 + 0.3;
-    ctx.globalAlpha = 0.25 + rand() * 0.6;
-    ctx.fillStyle = "#ffffff";
-    ctx.beginPath();
-    ctx.arc(rand() * W, rand() * H, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-}
+// ─── 繪製 ──────────────────────────────────────────────
 
 function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number): string {
   if (ctx.measureText(text).width <= maxWidth) return text;
@@ -167,29 +318,48 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number):
   return t + "…";
 }
 
-function drawTexts(ctx: CanvasRenderingContext2D, layout: Layout, input: CloudInput) {
+function drawTexts(ctx: CanvasRenderingContext2D, layout: Layout, theme: Theme, input: CloudInput) {
   const W = layout.width;
-  const ff = input.fontFamily;
+  const { family, weight, lightWeight } = input.font;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
 
-  ctx.fillStyle = "#ffffff";
-  ctx.shadowColor = "rgba(182,156,255,0.8)";
-  ctx.shadowBlur = 24;
-  ctx.font = `900 68px ${ff}`;
+  ctx.fillStyle = theme.title;
+  if (theme.titleGlow) {
+    ctx.shadowColor = theme.titleGlow;
+    ctx.shadowBlur = 24;
+  }
+  ctx.font = `${weight} 68px ${family}`;
   ctx.fillText(fitText(ctx, input.title, W - 120), W / 2, layout.titleY);
   ctx.shadowBlur = 0;
 
-  ctx.fillStyle = "#c9c2ff";
-  ctx.font = `500 30px ${ff}`;
+  ctx.fillStyle = theme.subtitle;
+  ctx.font = `${lightWeight} 30px ${family}`;
   ctx.fillText(fitText(ctx, input.subtitle, W - 160), W / 2, layout.subtitleY);
 }
 
-/** 等字型載好再畫，否則 canvas 會用 fallback 字型 */
-async function ensureFonts(fontFamily: string) {
+/**
+ * 等字型載好再畫，否則 canvas 會用 fallback 字型。
+ * 中文字型是依 unicode-range 分段下載的，所以要把實際會畫的字都丟進去，才會載到對應的分段
+ */
+async function ensureFonts(input: CloudInput) {
+  const { family, weight, lightWeight } = input.font;
+  const text = [input.title, input.subtitle, ...input.titles].join("");
   await Promise.all(
-    ["500", "900"].map((w) => document.fonts.load(`${w} 40px ${fontFamily}`, "宇宙人Aa")),
+    [...new Set([weight, lightWeight])].map((w) => document.fonts.load(`${w} 40px ${family}`, text || "宇宙人")),
   );
+}
+
+/** 粗略估算形狀面積（每 20px 取樣一次），用來決定紋理字要放多少個 */
+function measureArea(ctx: CanvasRenderingContext2D, path: Path2D, w: number, h: number) {
+  const step = 20;
+  let hits = 0;
+  for (let y = step / 2; y < h; y += step) {
+    for (let x = step / 2; x < w; x += step) {
+      if (ctx.isPointInPath(path, x, y)) hits++;
+    }
+  }
+  return hits * step * step;
 }
 
 export async function renderCloud(
@@ -198,32 +368,41 @@ export async function renderCloud(
   signal: AbortSignal,
 ): Promise<void> {
   const { default: WordCloud } = await import("wordcloud");
-  await ensureFonts(input.fontFamily);
+  await ensureFonts(input);
   if (signal.aborted) return;
 
   const layout = LAYOUTS[input.format];
+  const theme = THEMES[input.theme];
   canvas.width = layout.width;
   canvas.height = layout.height;
   const ctx = canvas.getContext("2d")!;
   const rand = mulberry32(input.seed);
 
-  drawBackground(ctx, layout, rand);
-  drawTexts(ctx, layout, input);
+  theme.drawBackground(ctx, layout.width, layout.height, rand);
+  drawTexts(ctx, layout, theme, input);
   if (input.titles.length === 0) return;
 
-  ctx.font = `900 100px ${input.fontFamily}`;
+  const { family, weight } = input.font;
+  ctx.font = `${weight} 100px ${family}`;
   const measureEm = (text: string) => Math.max(ctx.measureText(text).width / 100, 1);
-  const { main, texture } = buildWords(input.titles, measureEm, rand, input.repeat, layout);
-
   const cloud = document.createElement("canvas");
   cloud.width = layout.cloud.w;
   cloud.height = layout.cloud.h;
   const cloudCtx = cloud.getContext("2d")!;
+  const shapePath = SHAPES[input.shape].path(cloud.width, cloud.height);
+
+  const { main, texture } = buildWords(
+    input.titles,
+    measureEm,
+    rand,
+    input.repeat,
+    layout,
+    theme,
+    measureArea(cloudCtx, shapePath, cloud.width, cloud.height),
+  );
 
   // 形狀遮罩：先把形狀以外塗滿，wordcloud2（clearCanvas: false）會當成已佔用，字就只會放在形狀裡；
   // 畫完再把遮罩擦掉。沒有遮罩的話，形狀大小由字數決定，放不下的大字會一路跑到畫布邊緣
-  const shapePath = new Path2D();
-  shapePath.ellipse(cloud.width / 2, cloud.height / 2, cloud.width / 2, cloud.height / 2, 0, 0, Math.PI * 2);
   cloudCtx.fillStyle = "#000";
   cloudCtx.fillRect(0, 0, cloud.width, cloud.height);
   cloudCtx.globalCompositeOperation = "destination-out";
@@ -231,7 +410,7 @@ export async function renderCloud(
   cloudCtx.globalCompositeOperation = "source-over";
 
   // 分兩次畫：先放主角和陪襯，再讓紋理填進剩下的空位。
-  // 第二次 clearCanvas: false，wordcloud2 會把已經畫好的字當成佔用，所以兩層不會重疊，
+  // 第二次一樣不清畫布，wordcloud2 會把已經畫好的字當成佔用，所以兩層不會重疊，
   // 而且紋理可以用比較高的直排比例，做出橫直交錯的編織感
   const runPass = (words: WordSpec[], options: { rotateRatio: number; gridSize: number; shrinkToFit: boolean }) =>
     new Promise<void>((resolve) => {
@@ -255,9 +434,9 @@ export async function renderCloud(
       const colorOf = new Map(words.map((w) => [w.text, w.color]));
       WordCloud(cloud, {
         list: words.map((w) => [w.text, w.size]),
-        color: (word) => colorOf.get(word) ?? "#ffffff",
-        fontFamily: input.fontFamily,
-        fontWeight: 900,
+        color: (word) => colorOf.get(word) ?? theme.title,
+        fontFamily: family,
+        fontWeight: weight,
         backgroundColor: "rgba(0,0,0,0)",
         shape: "circle",
         ellipticity: layout.cloud.h / layout.cloud.w,
@@ -283,6 +462,5 @@ export async function renderCloud(
   cloudCtx.fill(outside, "evenodd");
   cloudCtx.globalCompositeOperation = "source-over";
 
-  if (signal.aborted) return;
   ctx.drawImage(cloud, (layout.width - layout.cloud.w) / 2, layout.cloud.top);
 }
