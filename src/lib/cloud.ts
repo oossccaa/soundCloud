@@ -32,8 +32,6 @@ export const LAYOUTS: Record<CloudFormat, Layout> = {
   },
 };
 
-const CLOUD_W = 1000;
-
 /** 歌曲少於這個數量時一定要重複填滿，不然形狀會太空 */
 export const MIN_SONGS_WITHOUT_REPEAT = 20;
 
@@ -69,35 +67,91 @@ function mulberry32(seed: number) {
   };
 }
 
-/** 排名越前字越大；同時依歌名長度限制最大字級，避免長歌名塞不進去 */
+// 三層字：主角（最愛的前幾首，大字亮色）→ 陪襯（其餘的歌，小字、越後面越淡）→ 紋理（重複的更小更淡的字）
+const HERO_MAX = 140;
+const HERO_DECAY = 0.88;
+const SUPPORT_MAX = 30;
+const SUPPORT_MIN = 16;
+/** 主角最多幾首；歌少時取前 30%，至少 1 首 */
+const heroCountFor = (n: number) => Math.min(ACCENTS.length, Math.max(1, Math.ceil(n * 0.3)));
+
+/** 主角放大到大約佔形狀這個比例（大字之間有空隙，實際看起來會少一些） */
+const HERO_FILL_TARGET = 0.55;
+const MAX_HERO_SCALE = 1.8;
+
+function withAlpha(hex: string, alpha: number) {
+  const n = Number.parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha.toFixed(2)})`;
+}
+
+const pick = <T,>(list: T[], rand: () => number) => list[Math.floor(rand() * list.length)];
+
 function buildWords(
   titles: string[],
   measureEm: (text: string) => number,
   rand: () => number,
   repeat: boolean,
-  scale: number,
+  layout: Layout,
 ): WordSpec[] {
   const n = titles.length;
-  const words: WordSpec[] = titles.map((text, i) => {
-    const w = n === 1 ? 1 : 1 - (i / (n - 1)) * 0.85;
-    const cap = (CLOUD_W * 0.72) / measureEm(text);
-    const size = Math.round(Math.min((22 + 118 * w ** 1.8) * scale, cap));
-    const color = i < ACCENTS.length ? ACCENTS[i] : ACCENTS[Math.floor(rand() * ACCENTS.length)];
-    return { text, size, color };
-  });
+  const heroCount = heroCountFor(n);
+  const ems = titles.map(measureEm);
 
-  if (!repeat && n >= MIN_SONGS_WITHOUT_REPEAT) return words;
+  // 主角：依名次遞減，長歌名有寬度上限，而且不能比前一名大（可能被壓成一樣大，可接受）
+  const heroSizes = (k: number) => {
+    const sizes: number[] = [];
+    for (let i = 0; i < heroCount; i++) {
+      const widthCap = (layout.cloud.w * 0.88) / ems[i];
+      sizes.push(Math.min(HERO_MAX * HERO_DECAY ** i * k, widthCap, sizes[i - 1] ?? Infinity));
+    }
+    return sizes;
+  };
 
-  // 小字重複填滿形狀，做出 WordArt 那種密集感
-  // 每個填充字尾端加不同數量的零寬空白，讓它和主字、其他填充字的 key 都不同
-  const repeats = Math.min(6, Math.max(1, Math.ceil(80 / n)));
-  for (let r = 0; r < repeats; r++) {
-    for (const text of titles) {
-      words.push({
-        text: text + "​".repeat(r + 1),
-        size: 12 + Math.floor(rand() * 13),
-        color: FILLERS[Math.floor(rand() * FILLERS.length)],
-      });
+  // 主角太小時整體放大，讓主角撐起畫面中央
+  const shapeArea = (Math.PI / 4) * layout.cloud.w * layout.cloud.h;
+  const heroCoverage = (k: number) =>
+    heroSizes(k).reduce((sum, size, i) => sum + size ** 2 * ems[i], 0) / shapeArea;
+  let k = layout.wordScale;
+  if (heroCoverage(k) < HERO_FILL_TARGET) {
+    let lo = k;
+    let hi = MAX_HERO_SCALE;
+    for (let step = 0; step < 20; step++) {
+      const mid = (lo + hi) / 2;
+      if (heroCoverage(mid) < HERO_FILL_TARGET) lo = mid;
+      else hi = mid;
+    }
+    k = lo;
+  }
+
+  const words: WordSpec[] = heroSizes(k).map((size, i) => ({
+    text: titles[i],
+    size: Math.round(size),
+    color: ACCENTS[i],
+  }));
+
+  // 陪襯：名次越後面字越小、越淡
+  const supportCount = n - heroCount;
+  for (let j = 0; j < supportCount; j++) {
+    const t = supportCount === 1 ? 0 : j / (supportCount - 1); // 0 → 1
+    words.push({
+      text: titles[heroCount + j],
+      size: Math.round((SUPPORT_MAX - (SUPPORT_MAX - SUPPORT_MIN) * t) * layout.wordScale),
+      color: withAlpha(pick(ACCENTS, rand), 0.8 - 0.3 * t),
+    });
+  }
+
+  if (repeat || n < MIN_SONGS_WITHOUT_REPEAT) {
+    // 紋理：所有歌名重複成更小更淡的字，填滿形狀
+    // 每個填充字尾端加不同數量的零寬空白，讓它和主字、其他填充字的 key 都不同
+    const repeats = Math.min(6, Math.max(1, Math.ceil(80 / n)));
+    for (let r = 0; r < repeats; r++) {
+      for (const text of titles) {
+        words.push({
+          text: text + "\u200b".repeat(r + 1),
+          size: Math.round((11 + rand() * 9) * layout.wordScale),
+          color: pick(FILLERS, rand),
+        });
+      }
     }
   }
 
@@ -178,7 +232,7 @@ export async function renderCloud(
 
   ctx.font = `900 100px ${input.fontFamily}`;
   const measureEm = (text: string) => Math.max(ctx.measureText(text).width / 100, 1);
-  const words = buildWords(input.titles, measureEm, rand, input.repeat, layout.wordScale);
+  const words = buildWords(input.titles, measureEm, rand, input.repeat, layout);
 
   const cloud = document.createElement("canvas");
   cloud.width = layout.cloud.w;

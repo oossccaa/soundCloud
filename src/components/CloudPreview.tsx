@@ -44,7 +44,7 @@ export function CloudPreview({
   const [subtitle, setSubtitle] = useState(`我的歌單排行 Top ${titles.length}`);
   const [subtitleEdited, setSubtitleEdited] = useState(false);
   const [rendering, setRendering] = useState(false);
-  const [repeatPref, setRepeatPref] = useState(false);
+  const [repeatPref, setRepeatPref] = useState(true);
   const [format, setFormat] = useState<CloudFormat>("square");
   const layout = LAYOUTS[format];
 
