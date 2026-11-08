@@ -67,17 +67,18 @@ function mulberry32(seed: number) {
   };
 }
 
-// 三層字：主角（最愛的前幾首，大字亮色）→ 陪襯（其餘的歌，小字、越後面越淡）→ 紋理（重複的更小更淡的字）
-const HERO_MAX = 140;
-const HERO_DECAY = 0.88;
-const SUPPORT_MAX = 30;
-const SUPPORT_MIN = 16;
+// 三層字：主角（最愛的前幾首）→ 陪襯（其餘的歌，越後面越小越淡）→ 紋理（重複的更小更淡的字）
+// 主角不要太大：圖在手機上看，48px 就很明顯了；字小一點，長歌名直著放也塞得進去，排列才有變化
+const HERO_MAX = 96;
+const HERO_DECAY = 0.9;
+const SUPPORT_MAX = 34;
+const SUPPORT_MIN = 18;
+const TEXTURE_MIN = 10;
+const TEXTURE_MAX = 18;
+/** 紋理字的數量：要多到能填滿形狀，放不下的會被略過 */
+const TEXTURE_COUNT = 280;
 /** 主角最多幾首；歌少時取前 30%，至少 1 首 */
 const heroCountFor = (n: number) => Math.min(ACCENTS.length, Math.max(1, Math.ceil(n * 0.3)));
-
-/** 主角放大到大約佔形狀這個比例（大字之間有空隙，實際看起來會少一些） */
-const HERO_FILL_TARGET = 0.55;
-const MAX_HERO_SCALE = 1.8;
 
 function withAlpha(hex: string, alpha: number) {
   const n = Number.parseInt(hex.slice(1), 16);
@@ -92,70 +93,50 @@ function buildWords(
   rand: () => number,
   repeat: boolean,
   layout: Layout,
-): WordSpec[] {
+): { main: WordSpec[]; texture: WordSpec[] } {
   const n = titles.length;
   const heroCount = heroCountFor(n);
   const ems = titles.map(measureEm);
+  const scale = layout.wordScale;
 
-  // 主角：依名次遞減，長歌名有寬度上限，而且不能比前一名大（可能被壓成一樣大，可接受）
-  const heroSizes = (k: number) => {
-    const sizes: number[] = [];
-    for (let i = 0; i < heroCount; i++) {
-      const widthCap = (layout.cloud.w * 0.88) / ems[i];
-      sizes.push(Math.min(HERO_MAX * HERO_DECAY ** i * k, widthCap, sizes[i - 1] ?? Infinity));
-    }
-    return sizes;
-  };
-
-  // 主角太小時整體放大，讓主角撐起畫面中央
-  const shapeArea = (Math.PI / 4) * layout.cloud.w * layout.cloud.h;
-  const heroCoverage = (k: number) =>
-    heroSizes(k).reduce((sum, size, i) => sum + size ** 2 * ems[i], 0) / shapeArea;
-  let k = layout.wordScale;
-  if (heroCoverage(k) < HERO_FILL_TARGET) {
-    let lo = k;
-    let hi = MAX_HERO_SCALE;
-    for (let step = 0; step < 20; step++) {
-      const mid = (lo + hi) / 2;
-      if (heroCoverage(mid) < HERO_FILL_TARGET) lo = mid;
-      else hi = mid;
-    }
-    k = lo;
+  // 主角：依名次遞減，長歌名有寬度上限，而且不能比前一名大
+  const main: WordSpec[] = [];
+  for (let i = 0; i < heroCount; i++) {
+    const widthCap = (layout.cloud.w * 0.88) / ems[i];
+    const size = Math.min(HERO_MAX * HERO_DECAY ** i * scale, widthCap, main[i - 1]?.size ?? Infinity);
+    main.push({ text: titles[i], size: Math.round(size), color: ACCENTS[i] });
   }
-
-  const words: WordSpec[] = heroSizes(k).map((size, i) => ({
-    text: titles[i],
-    size: Math.round(size),
-    color: ACCENTS[i],
-  }));
 
   // 陪襯：名次越後面字越小、越淡
   const supportCount = n - heroCount;
   for (let j = 0; j < supportCount; j++) {
     const t = supportCount === 1 ? 0 : j / (supportCount - 1); // 0 → 1
-    words.push({
+    main.push({
       text: titles[heroCount + j],
-      size: Math.round((SUPPORT_MAX - (SUPPORT_MAX - SUPPORT_MIN) * t) * layout.wordScale),
+      size: Math.round((SUPPORT_MAX - (SUPPORT_MAX - SUPPORT_MIN) * t) * scale),
       color: withAlpha(pick(ACCENTS, rand), 0.8 - 0.3 * t),
     });
   }
 
+  const texture: WordSpec[] = [];
   if (repeat || n < MIN_SONGS_WITHOUT_REPEAT) {
-    // 紋理：所有歌名重複成更小更淡的字，填滿形狀
+    // 紋理：所有歌名重複成更小更淡的字，填滿形狀；長歌名再縮小，避免變成一條條細長的雜訊
     // 每個填充字尾端加不同數量的零寬空白，讓它和主字、其他填充字的 key 都不同
-    const repeats = Math.min(6, Math.max(1, Math.ceil(80 / n)));
+    const repeats = Math.min(20, Math.max(1, Math.ceil(TEXTURE_COUNT / n)));
     for (let r = 0; r < repeats; r++) {
-      for (const text of titles) {
-        words.push({
+      titles.forEach((text, i) => {
+        const lengthFactor = Math.min(1, Math.sqrt(4 / ems[i]));
+        texture.push({
           text: text + "\u200b".repeat(r + 1),
-          size: Math.round((11 + rand() * 9) * layout.wordScale),
+          size: Math.round((TEXTURE_MIN + rand() * (TEXTURE_MAX - TEXTURE_MIN)) * lengthFactor * scale),
           color: pick(FILLERS, rand),
         });
-      }
+      });
     }
   }
 
-  return words.sort((a, b) => b.size - a.size);
+  const bySize = (a: WordSpec, b: WordSpec) => b.size - a.size;
+  return { main: main.sort(bySize), texture: texture.sort(bySize) };
 }
 
 function drawBackground(ctx: CanvasRenderingContext2D, layout: Layout, rand: () => number) {
@@ -232,44 +213,75 @@ export async function renderCloud(
 
   ctx.font = `900 100px ${input.fontFamily}`;
   const measureEm = (text: string) => Math.max(ctx.measureText(text).width / 100, 1);
-  const words = buildWords(input.titles, measureEm, rand, input.repeat, layout);
+  const { main, texture } = buildWords(input.titles, measureEm, rand, input.repeat, layout);
 
   const cloud = document.createElement("canvas");
   cloud.width = layout.cloud.w;
   cloud.height = layout.cloud.h;
+  const cloudCtx = cloud.getContext("2d")!;
 
-  await new Promise<void>((resolve) => {
-    const done = () => resolve();
-    cloud.addEventListener("wordcloudstop", done, { once: true });
-    signal.addEventListener(
-      "abort",
-      () => {
+  // 形狀遮罩：先把形狀以外塗滿，wordcloud2（clearCanvas: false）會當成已佔用，字就只會放在形狀裡；
+  // 畫完再把遮罩擦掉。沒有遮罩的話，形狀大小由字數決定，放不下的大字會一路跑到畫布邊緣
+  const shapePath = new Path2D();
+  shapePath.ellipse(cloud.width / 2, cloud.height / 2, cloud.width / 2, cloud.height / 2, 0, 0, Math.PI * 2);
+  cloudCtx.fillStyle = "#000";
+  cloudCtx.fillRect(0, 0, cloud.width, cloud.height);
+  cloudCtx.globalCompositeOperation = "destination-out";
+  cloudCtx.fill(shapePath);
+  cloudCtx.globalCompositeOperation = "source-over";
+
+  // 分兩次畫：先放主角和陪襯，再讓紋理填進剩下的空位。
+  // 第二次 clearCanvas: false，wordcloud2 會把已經畫好的字當成佔用，所以兩層不會重疊，
+  // 而且紋理可以用比較高的直排比例，做出橫直交錯的編織感
+  const runPass = (words: WordSpec[], options: { rotateRatio: number; gridSize: number; shrinkToFit: boolean }) =>
+    new Promise<void>((resolve) => {
+      if (words.length === 0 || signal.aborted) return resolve();
+      const onAbort = () => {
         WordCloud.stop();
         resolve();
-      },
-      { once: true },
-    );
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      cloud.addEventListener(
+        "wordcloudstop",
+        () => {
+          signal.removeEventListener("abort", onAbort);
+          resolve();
+        },
+        { once: true },
+      );
 
-    // weight 直接是字級（shrinkToFit 會把 weight 縮成 3/4 重試，所以不能拿來當 index）
-    // 顏色用文字查表；填充字尾端加了零寬空白，跟主字分得開
-    const colorOf = new Map(words.map((w) => [w.text, w.color]));
-    WordCloud(cloud, {
-      list: words.map((w) => [w.text, w.size]),
-      color: (word) => colorOf.get(word) ?? "#ffffff",
-      fontFamily: input.fontFamily,
-      fontWeight: 900,
-      backgroundColor: "rgba(0,0,0,0)",
-      gridSize: 6,
-      shape: "circle",
-      ellipticity: layout.cloud.h / layout.cloud.w,
-      rotateRatio: 0.2,
-      rotationSteps: 2,
-      minSize: 6,
-      shrinkToFit: true,
-      drawOutOfBound: false,
-      shuffle: true,
+      // weight 直接是字級（shrinkToFit 會把 weight 縮成 3/4 重試，所以不能拿來當 index）
+      // 顏色用文字查表；填充字尾端加了零寬空白，跟主字分得開
+      const colorOf = new Map(words.map((w) => [w.text, w.color]));
+      WordCloud(cloud, {
+        list: words.map((w) => [w.text, w.size]),
+        color: (word) => colorOf.get(word) ?? "#ffffff",
+        fontFamily: input.fontFamily,
+        fontWeight: 900,
+        backgroundColor: "rgba(0,0,0,0)",
+        shape: "circle",
+        ellipticity: layout.cloud.h / layout.cloud.w,
+        rotationSteps: 2,
+        minSize: 6,
+        drawOutOfBound: false,
+        clearCanvas: false,
+        shuffle: true,
+        ...options,
+      });
     });
-  });
+
+  await runPass(main, { rotateRatio: 0.3, gridSize: 6, shrinkToFit: true });
+  // 紋理字很多，放不下就直接略過，不要一直縮小重試（很慢）
+  await runPass(texture, { rotateRatio: 0.5, gridSize: 4, shrinkToFit: false });
+  if (signal.aborted) return;
+
+  // 擦掉形狀以外的遮罩
+  cloudCtx.globalCompositeOperation = "destination-out";
+  const outside = new Path2D();
+  outside.rect(0, 0, cloud.width, cloud.height);
+  outside.addPath(shapePath);
+  cloudCtx.fill(outside, "evenodd");
+  cloudCtx.globalCompositeOperation = "source-over";
 
   if (signal.aborted) return;
   ctx.drawImage(cloud, (layout.width - layout.cloud.w) / 2, layout.cloud.top);
