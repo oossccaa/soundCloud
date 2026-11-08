@@ -4,6 +4,8 @@ import { useState } from "react";
 
 export type RankedSong = { id: number | string; title: string; album?: string };
 
+const RANK_COLORS = ["text-[#FFD166]", "text-[#FF6B9A]", "text-[#7AE7FF]"];
+
 export function RankingList({
   items,
   onChange,
@@ -13,13 +15,28 @@ export function RankingList({
 }) {
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [overIndex, setOverIndex] = useState<number | null>(null);
+  const [editingIndex, setEditingIndex] = useState<number | null>(null);
+  const [rankDraft, setRankDraft] = useState("");
 
   const move = (from: number, to: number) => {
-    if (to < 0 || to >= items.length || from === to) return;
+    to = Math.min(Math.max(to, 0), items.length - 1);
+    if (from === to) return;
     const next = [...items];
     const [item] = next.splice(from, 1);
     next.splice(to, 0, item);
     onChange(next);
+  };
+
+  const startEditRank = (i: number) => {
+    setEditingIndex(i);
+    setRankDraft(String(i + 1));
+  };
+
+  const commitRank = () => {
+    if (editingIndex == null) return;
+    const target = Number.parseInt(rankDraft, 10);
+    if (Number.isFinite(target)) move(editingIndex, target - 1);
+    setEditingIndex(null);
   };
 
   if (items.length === 0) {
@@ -37,7 +54,7 @@ export function RankingList({
       {items.map((song, i) => (
         <li
           key={song.id}
-          draggable
+          draggable={editingIndex !== i}
           onDragStart={() => setDragIndex(i)}
           onDragOver={(e) => {
             e.preventDefault();
@@ -58,18 +75,40 @@ export function RankingList({
               : "border-white/10 bg-white/5"
           } ${dragIndex === i ? "opacity-40" : ""}`}
         >
-          <span
-            className={`w-7 shrink-0 text-center text-sm font-black ${
-              i === 0 ? "text-[#FFD166]" : i === 1 ? "text-[#FF6B9A]" : i === 2 ? "text-[#7AE7FF]" : "text-white/50"
-            }`}
-          >
-            {i + 1}
-          </span>
+          {editingIndex === i ? (
+            <input
+              autoFocus
+              type="number"
+              min={1}
+              max={items.length}
+              value={rankDraft}
+              onChange={(e) => setRankDraft(e.target.value)}
+              onBlur={commitRank}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") commitRank();
+                if (e.key === "Escape") setEditingIndex(null);
+              }}
+              className="w-10 shrink-0 rounded-md border border-violet-300/60 bg-black/30 px-1 text-center text-sm font-black outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none"
+            />
+          ) : (
+            <button
+              onClick={() => startEditRank(i)}
+              title="點一下輸入名次"
+              className={`w-10 shrink-0 rounded-md text-center text-sm font-black hover:bg-white/10 ${
+                RANK_COLORS[i] ?? "text-white/50"
+              }`}
+            >
+              {i + 1}
+            </button>
+          )}
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm">{song.title}</div>
             {song.album && <div className="truncate text-xs text-white/40">{song.album}</div>}
           </div>
           <div className="flex shrink-0 gap-0.5 text-white/60">
+            <button onClick={() => move(i, 0)} disabled={i === 0} title="置頂" className="rounded px-1.5 hover:bg-white/10 disabled:opacity-20" aria-label="置頂">
+              ⤒
+            </button>
             <button onClick={() => move(i, i - 1)} disabled={i === 0} className="rounded px-1.5 hover:bg-white/10 disabled:opacity-20" aria-label="上移">
               ↑
             </button>

@@ -39,9 +39,11 @@ export function SongCloudApp({ fontFamily }: { fontFamily: string }) {
     return f ? songs.filter((s) => `${s.title} ${s.album}`.toLowerCase().includes(f)) : songs;
   }, [songs, filter]);
 
-  const addSong = (song: Song) =>
+  const toggleSong = (song: Song) =>
     setRanking((prev) =>
-      prev.some((s) => s.id === song.id) ? prev : [...prev, { id: song.id, title: song.title, album: song.album }],
+      prev.some((s) => s.id === song.id)
+        ? prev.filter((s) => s.id !== song.id)
+        : [...prev, { id: song.id, title: song.title, album: song.album }],
     );
 
   const addCustom = () => {
@@ -113,12 +115,24 @@ export function SongCloudApp({ fontFamily }: { fontFamily: string }) {
                     <div className="truncate text-xs text-white/40">{song.album}</div>
                   </div>
                   <button
-                    onClick={() => addSong(song)}
-                    disabled={added}
-                    className="size-8 shrink-0 rounded-full border border-white/15 text-lg leading-none hover:bg-violet-300/20 disabled:border-transparent disabled:text-emerald-300"
-                    aria-label={added ? "已加入" : "加入排行"}
+                    onClick={() => toggleSong(song)}
+                    aria-pressed={added}
+                    title={added ? "從排行移除" : "加入排行"}
+                    className={`group/toggle size-8 shrink-0 rounded-full border text-lg leading-none ${
+                      added
+                        ? "border-emerald-300/40 bg-emerald-300/10 text-emerald-300 hover:border-red-300/50 hover:bg-red-400/15 hover:text-red-300"
+                        : "border-white/15 hover:bg-violet-300/20"
+                    }`}
+                    aria-label={added ? "從排行移除" : "加入排行"}
                   >
-                    {added ? "✓" : "+"}
+                    {added ? (
+                      <>
+                        <span className="group-hover/toggle:hidden">✓</span>
+                        <span className="hidden group-hover/toggle:inline">−</span>
+                      </>
+                    ) : (
+                      "+"
+                    )}
                   </button>
                 </li>
               );
@@ -142,7 +156,7 @@ export function SongCloudApp({ fontFamily }: { fontFamily: string }) {
         <section className="flex min-w-0 flex-col gap-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4">
           <div className="flex items-center justify-between">
             <h2 className="font-bold">
-              我的排行 <span className="text-sm font-normal text-white/40">{ranking.length} 首 · 可拖曳排序</span>
+              我的排行 <span className="text-sm font-normal text-white/40">{ranking.length} 首 · 拖曳、⤒ 置頂，或點名次直接輸入</span>
             </h2>
             {ranking.length > 0 && (
               <button
