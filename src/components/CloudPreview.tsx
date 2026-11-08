@@ -1,12 +1,26 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { LAYOUTS, MIN_SONGS_WITHOUT_REPEAT, renderCloud, type CloudFormat } from "@/lib/cloud";
 
 const FORMAT_OPTIONS: { value: CloudFormat; label: string }[] = [
   { value: "square", label: "方形貼文 1:1" },
   { value: "story", label: "限時動態 9:16" },
 ];
+
+// 觸控裝置（手機、平板）改用系統分享選單，才能「儲存影像」到相簿或直接分享到 IG
+const COARSE_POINTER = "(pointer: coarse)";
+function useIsTouchDevice() {
+  return useSyncExternalStore(
+    (cb) => {
+      const mq = window.matchMedia(COARSE_POINTER);
+      mq.addEventListener("change", cb);
+      return () => mq.removeEventListener("change", cb);
+    },
+    () => window.matchMedia(COARSE_POINTER).matches,
+    () => false,
+  );
+}
 
 const inputClass =
   "w-full rounded-xl border bg-white/5 px-3 py-2 text-sm outline-none placeholder:text-white/40";
@@ -21,6 +35,10 @@ export function CloudPreview({
   fontFamily: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  // 每次畫完就先轉好 PNG：iOS Safari 要求 navigator.share 在點擊當下同步呼叫，不能先 await toBlob
+  const blobRef = useRef<Blob | null>(null);
+  const isTouch = useIsTouchDevice();
+  const [fallbackUrl, setFallbackUrl] = useState<string | null>(null);
   const [seed, setSeed] = useState(1);
   const [title, setTitle] = useState(artistName);
   const [subtitle, setSubtitle] = useState(`我的歌單排行 Top ${titles.length}`);
@@ -45,6 +63,7 @@ export function CloudPreview({
     // 排行或文字連續調整時不要每次都重畫
     const timer = setTimeout(() => {
       setRendering(true);
+      blobRef.current = null;
       renderCloud(
         canvas,
         {
@@ -58,7 +77,12 @@ export function CloudPreview({
         },
         ctrl.signal,
       ).finally(() => {
-        if (!ctrl.signal.aborted) setRendering(false);
+        if (ctrl.signal.aborted) return;
+        canvas.toBlob((blob) => {
+          if (ctrl.signal.aborted) return;
+          blobRef.current = blob;
+          setRendering(false);
+        }, "image/png");
       });
     }, 350);
     return () => {
@@ -67,13 +91,40 @@ export function CloudPreview({
     };
   }, [format, trimmedTitle, effectiveSubtitle, titlesKey, repeat, fontFamily, seed]);
 
-  const download = () => {
-    const canvas = canvasRef.current;
-    if (!canvas || titleMissing) return;
+  const filename = `${trimmedTitle}-${format}.png`;
+
+  const download = (blob: Blob) => {
+    const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = canvas.toDataURL("image/png");
-    a.download = `${trimmedTitle}-${format}.png`;
+    a.href = url;
+    a.download = filename;
     a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  /** 不支援分享選單時（例如 IG、LINE 內建瀏覽器），顯示圖片讓使用者長按儲存 */
+  const showFallback = (blob: Blob) => setFallbackUrl(URL.createObjectURL(blob));
+
+  const closeFallback = () => {
+    if (fallbackUrl) URL.revokeObjectURL(fallbackUrl);
+    setFallbackUrl(null);
+  };
+
+  const save = () => {
+    const blob = blobRef.current;
+    if (!blob || titleMissing) return;
+    if (!isTouch) return download(blob);
+
+    const file = new File([blob], filename, { type: "image/png" });
+    if (navigator.canShare?.({ files: [file] })) {
+      navigator.share({ files: [file] }).catch((err: unknown) => {
+        // 使用者自己取消分享就不用處理
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        showFallback(blob);
+      });
+    } else {
+      showFallback(blob);
+    }
   };
 
   return (
@@ -168,14 +219,40 @@ export function CloudPreview({
           🔀 重新排列
         </button>
         <button
-          onClick={download}
+          onClick={save}
           disabled={titles.length === 0 || rendering || titleMissing}
           title={titleMissing ? "請先填寫標題" : undefined}
           className="flex-1 rounded-xl bg-gradient-to-r from-violet-400 to-pink-400 px-4 py-2 text-sm font-bold text-[#140f33] hover:brightness-110 disabled:opacity-40"
         >
-          ⬇ 下載 PNG（{layout.width}×{layout.height}）
+          {isTouch ? "📲 儲存 / 分享圖片" : `⬇ 下載 PNG（${layout.width}×${layout.height}）`}
         </button>
       </div>
+
+      {fallbackUrl && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="儲存圖片"
+          onClick={closeFallback}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 bg-black/85 p-4"
+        >
+          <p className="text-center text-sm text-white/80">
+            長按圖片 →「加入照片」或「儲存圖片」
+            <br />
+            <span className="text-xs text-white/50">IG、LINE 的內建瀏覽器只能這樣存；用 Safari / Chrome 開可以直接分享</span>
+          </p>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={fallbackUrl}
+            alt={filename}
+            onClick={(e) => e.stopPropagation()}
+            className="max-h-[75vh] max-w-full rounded-xl object-contain"
+          />
+          <button onClick={closeFallback} className="rounded-full border border-white/20 px-5 py-2 text-sm">
+            關閉
+          </button>
+        </div>
+      )}
     </div>
   );
 }

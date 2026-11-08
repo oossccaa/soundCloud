@@ -156,7 +156,7 @@ export function SongCloudApp({ fontFamily }: { fontFamily: string }) {
         <section className="flex min-w-0 flex-col gap-3 rounded-3xl border border-white/10 bg-white/[0.03] p-4">
           <div className="flex items-center justify-between">
             <h2 className="font-bold">
-              我的排行 <span className="text-sm font-normal text-white/40">{ranking.length} 首 · 拖曳、⤒ 置頂，或點名次直接輸入</span>
+              我的排行 <span className="text-sm font-normal text-white/40">{ranking.length} 首 · 拖 ⠿ 排序、點名次可直接輸入</span>
             </h2>
             {ranking.length > 0 && (
               <button
