@@ -11,11 +11,25 @@
   --font-sans: var(--font-noto-tc), system-ui, sans-serif;
 }
 
+/* 底色只放 html：body 若也有底色，會蓋住下面 z-index: -1 的光暈 */
+html {
+  background-color: var(--background);
+}
+
 body {
-  background:
-    radial-gradient(1200px 600px at 80% -10%, rgba(124, 92, 255, 0.18), transparent),
-    radial-gradient(900px 500px at -10% 110%, rgba(255, 107, 154, 0.12), transparent),
-    var(--background);
   color: var(--foreground);
   font-family: var(--font-sans);
+}
+
+/* 光暈固定在視窗上，不跟著頁面長度重複鋪（直接放 body 背景會每一個螢幕高重鋪一次，出現接縫）
+   用 fixed 偽元素而不是 background-attachment: fixed，因為 iOS Safari 不支援後者 */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(124, 92, 255, 0.18), transparent),
+    radial-gradient(900px 500px at -10% 110%, rgba(255, 107, 154, 0.12), transparent);
 }
